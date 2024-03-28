@@ -7,6 +7,9 @@ import os
 import sys
 import matplotlib.pyplot as plt
 
+# for confusion matrix
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
 # path to data
 sys.path.append(os.path.join(os.getcwd(), "../../../data"))
 from data_utils import load_dataset
@@ -21,7 +24,8 @@ def init_randn(m, n, rs=npr.RandomState(0)):
 def init_xavier(m, n, rs=npr.RandomState(0)):
     """ TODO: init mxn matrix using Xavier intialization
     """
-    pass
+    epsilon = 1/np.sqrt(m) # m is number of input units, m = D
+    return epsilon * rs.randn(m,n)
 
 
 def init_net_params(layer_sizes, init_fcn, rs=npr.RandomState(0)):
@@ -50,7 +54,19 @@ def neural_net_predict(params, inputs):
 def mean_log_like(params, inputs, targets):
     """ TODO: return the log-likelihood / the number of inputs 
     """
-    raise NotImplementedError("mean_log_like function not completed (see Q3).")
+    N = inputs.shape[0] # number of inputs
+    log_probs = neural_net_predict(params, inputs) # normalized class log-probabilities
+
+    # inputs is (N,D)
+    # targets is (N,K)
+    # log_probs is (N,K)
+    outer_sum = 0
+    for i in range(N):
+        inner_sum = targets[i].dot(log_probs[i])
+        outer_sum += inner_sum
+
+    return outer_sum / N
+    # raise NotImplementedError("mean_log_like function not completed (see Q3).")
 
 
 def accuracy(params, inputs, targets):
@@ -65,18 +81,29 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------------------------
     # EXAMPLE OF HOW TO USE STARTER CODE BELOW
     # ----------------------------------------------------------------------------------
+    npr.seed(100)
 
     # loading data
     x_train, x_valid, x_test, y_train, y_valid, y_test = load_dataset("mnist_small")
 
     # initializing parameters
-    layer_sizes = [784, 200, 10]
-    params = init_net_params(layer_sizes, init_randn)
-
+    # below are original, starter code parametres
+    # layer_sizes = [784, 200, 10]
+    # params = init_net_params(layer_sizes, init_randn)
+    
     # setting up training parameters
-    num_epochs = 5
-    learning_rate = 1e-1
-    batch_size = 256
+    # below are original, starter code training parameters
+    # num_epochs = 5
+    # learning_rate = 1e-1
+    # batch_size = 256
+
+    # these are my tuned parameters
+    layer_sizes = [784, 200, 50, 10] # added another hidden layer with 50 neurons/units
+    params = init_net_params(layer_sizes, init_xavier) # switch to xavier initialization
+
+    num_epochs = 20 # 20
+    learning_rate = 0.005 # smaller eta --> this greatly improves results, starter code eta was way too big...
+    batch_size = 256 # same
 
     # Constants for batching
     num_batches = int(np.ceil(len(x_train) / batch_size))
@@ -96,12 +123,19 @@ if __name__ == "__main__":
     # Get gradient of objective using autograd.
     objective_grad = grad(objective)
 
-    print("     Epoch     |    Train accuracy  |       Test accuracy  ")
+    # print("     Epoch     |    Train accuracy  |       Test accuracy  ") # test accuracy is actually validation accuracy...
+    print("     Epoch     |    Train accuracy  | Validation accuracy  ")
 
-    # Dictionary to store train/val history
+    # Dictionary to store train/val history # added accuracy fields # add parameters fields
     opt_history = {
         "train_nll": [],
         "val_nll": [],
+
+        "train_acc": [],
+        "val_acc": [],
+        "test_acc": [],
+
+        "params": []
     }
 
     def callback(params, iter, gradient):
@@ -111,6 +145,16 @@ if __name__ == "__main__":
             opt_history["val_nll"].append(-mean_log_like(params, x_valid, y_valid))
             train_acc = accuracy(params, x_train, y_train)
             val_acc = accuracy(params, x_valid, y_valid)
+            
+            # add train, valid, test_acc
+            test_acc = accuracy(params, x_test, y_test)
+            opt_history["train_acc"].append(train_acc)
+            opt_history["val_acc"].append(val_acc)
+            opt_history["test_acc"].append(test_acc)
+
+            # save parameters
+            opt_history["params"].append(params)
+
             print("{:15}|{:20}|{:20}".format(iter // num_batches, train_acc, val_acc))
 
     # We will optimize using Adam (a variant of SGD that makes better use of
@@ -123,7 +167,27 @@ if __name__ == "__main__":
         callback=callback,
     )
 
+    # Report final training, validation, test accuracy
+    print("Final results:")
+    print("\tTrain accuracy: {}".format(opt_history["train_acc"][-1]))
+    print("\tValidation accuracy: {}".format(opt_history["val_acc"][-1]))
+    print("\tTest accuracy: {}".format(opt_history["test_acc"][-1]))
+
     # Plotting the train and validation negative log-likelihood
-    plt.plot(opt_history["train_nll"])
-    plt.plot(opt_history["val_nll"])
+    plt.figure()
+    plt.plot(opt_history["train_nll"], label="train_nll")
+    plt.plot(opt_history["val_nll"], label="val_nll")
+    plt.ylabel("Negative Mean Log-Likelihood")
+    plt.xlabel("Epoch #")
+    plt.title("Training and Validation Loss")
+    plt.legend(loc='best')
+    plt.show()
+
+    # Plot the confusion matrix for the validation set
+    target_class = np.argmax(y_valid, axis=1)
+    predicted_class = np.argmax(neural_net_predict(opt_history["params"][-1], x_valid), axis=1)
+    conf_matrix = confusion_matrix(target_class,
+                                   predicted_class)
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix)
+    disp.plot()
     plt.show()
